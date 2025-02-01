@@ -6,6 +6,9 @@ import { Download } from "lucide-react";
 import { toast } from "sonner";
 import { ChatMessage as ChatMessageType, BusinessSector } from "../types/businessTypes";
 import { businessTemplates } from "../data/sampleTemplates";
+import { processExcelFile, CellData } from "../utils/excelProcessor";
+import { processCellBackground, getTemplateForSector } from "../services/templateProcessor";
+import { searchWeb } from "../services/searchService";
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([
@@ -19,47 +22,47 @@ const ChatInterface = () => {
   ]);
   const [selectedSector, setSelectedSector] = useState<BusinessSector | null>(null);
   const [template, setTemplate] = useState<string | null>(null);
+  const [excelData, setExcelData] = useState<CellData[]>([]);
 
-  const handleSendMessage = async (text: string) => {
-    // Add user message
-    const userMessage: ChatMessageType = {
+  const addMessage = (text: string, sent: boolean, type: 'question' | 'response' | 'system' = 'response') => {
+    const newMessage: ChatMessageType = {
       id: messages.length + 1,
       text,
       timestamp: new Date(),
-      sent: true
+      sent,
+      type
     };
-    setMessages(prev => [...prev, userMessage]);
+    setMessages(prev => [...prev, newMessage]);
+    return newMessage;
+  };
 
-    // Process user input
+  const askUser = async (question: string): Promise<string> => {
+    addMessage(question, false, 'question');
+    // In a real implementation, you would wait for user input
+    // For now, we'll return a mock response
+    return "Mock user response";
+  };
+
+  const handleSendMessage = async (text: string) => {
+    addMessage(text, true);
+
     if (!selectedSector) {
-      // Handle sector selection
       const sector = processSectorSelection(text);
       if (sector) {
         setSelectedSector(sector);
-        const template = businessTemplates.find(t => t.sector === sector);
+        const template = getTemplateForSector(sector);
         if (template) {
           setTemplate(template.template);
-          const responseMessage: ChatMessageType = {
-            id: messages.length + 2,
-            text: "Great! I've selected the appropriate template for your business. Tell me about your business story - how did it start and what's your vision?",
-            timestamp: new Date(),
-            sent: false,
-            type: 'question'
-          };
-          setMessages(prev => [...prev, responseMessage]);
+          addMessage(
+            "Great! I've selected the appropriate template for your business. Tell me about your business story - how did it start and what's your vision?",
+            false,
+            'question'
+          );
         }
       } else {
-        const errorMessage: ChatMessageType = {
-          id: messages.length + 2,
-          text: "Please select a valid sector (1-5)",
-          timestamp: new Date(),
-          sent: false,
-          type: 'system'
-        };
-        setMessages(prev => [...prev, errorMessage]);
+        addMessage("Please select a valid sector (1-5)", false, 'system');
       }
     } else {
-      // Process business story and ask follow-up questions
       processBusinessStory(text);
     }
   };
@@ -75,52 +78,45 @@ const ChatInterface = () => {
     return sectorMap[text] || null;
   };
 
-  const processBusinessStory = (story: string) => {
+  const processBusinessStory = async (story: string) => {
     console.log("Processing business story:", story);
-    // Add follow-up question
-    const followUpMessage: ChatMessageType = {
-      id: messages.length + 2,
-      text: "Thank you for sharing your story. What's your expected revenue for the first year?",
-      timestamp: new Date(),
-      sent: false,
-      type: 'question'
-    };
-    setMessages(prev => [...prev, followUpMessage]);
+    
+    if (excelData.length > 0) {
+      const processedCells = await processCellBackground(
+        excelData,
+        askUser,
+        searchWeb
+      );
+      setExcelData(processedCells);
+      addMessage("I've processed your Excel file and updated the cells accordingly.", false, 'system');
+    }
+
+    addMessage(
+      "Thank you for sharing your story. What's your expected revenue for the first year?",
+      false,
+      'question'
+    );
   };
 
-  const handleFileUpload = (file: File) => {
-    console.log("File uploaded:", file);
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        // Here you would process the file content
-        // For now, just show a success message
-        toast.success(`File ${file.name} uploaded successfully`);
-        
-        const message: ChatMessageType = {
-          id: messages.length + 1,
-          text: `File "${file.name}" has been uploaded. I'll analyze its contents.`,
-          timestamp: new Date(),
-          sent: false,
-          type: 'system'
-        };
-        setMessages(prev => [...prev, message]);
-      } catch (error) {
-        toast.error("Error processing file");
-      }
-    };
-
-    reader.onerror = () => {
-      toast.error("Error reading file");
-    };
-
-    reader.readAsText(file);
+  const handleFileUpload = async (file: File) => {
+    try {
+      const cells = await processExcelFile(file);
+      setExcelData(cells);
+      
+      toast.success(`File ${file.name} uploaded successfully`);
+      addMessage(
+        `File "${file.name}" has been uploaded. I'll analyze its contents and process cells with yellow (user input needed) and pink (web search needed) backgrounds.`,
+        false,
+        'system'
+      );
+    } catch (error) {
+      toast.error("Error processing file");
+      console.error("File processing error:", error);
+    }
   };
 
   const handleDownload = () => {
     if (template) {
-      // For demo purposes, we'll create a simple text file
       const blob = new Blob([`Sample template for ${selectedSector} sector`], { type: 'text/plain' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
