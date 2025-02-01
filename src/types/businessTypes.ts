@@ -19,3 +19,9 @@ export interface ChatMessage {
   sent: boolean;
   type?: 'question' | 'response' | 'system';
 }
+
+declare global {
+  interface Window {
+    tempResolve: ((value: string) => void) | null;
+  }
+}

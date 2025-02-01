@@ -7,44 +7,49 @@ import { toast } from "sonner";
 import { ChatMessage as ChatMessageType, BusinessSector } from "../types/businessTypes";
 import { businessTemplates } from "../data/sampleTemplates";
 import { processExcelFile, CellData } from "../utils/excelProcessor";
-import { processCellBackground, getTemplateForSector } from "../services/templateProcessor";
-import { searchWeb } from "../services/searchService";
+import { getTemplateForSector } from "../services/templateProcessor";
+import { createMessage, processSectorSelection } from "../services/chatService";
+import { processExcelCells } from "../services/excelService";
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([
-    {
-      id: 1,
-      text: "Hello! I'm your business plan assistant. What sector is your business in?\n\n1. Retail\n2. Technology\n3. Manufacturing\n4. Services\n5. Food",
-      timestamp: new Date(),
-      sent: false,
-      type: 'question'
-    },
+    createMessage(
+      "Hello! I'm your business plan assistant. What sector is your business in?\n\n1. Retail\n2. Technology\n3. Manufacturing\n4. Services\n5. Food",
+      false,
+      'question'
+    ),
   ]);
   const [selectedSector, setSelectedSector] = useState<BusinessSector | null>(null);
   const [template, setTemplate] = useState<string | null>(null);
   const [excelData, setExcelData] = useState<CellData[]>([]);
+  const [isProcessingCells, setIsProcessingCells] = useState(false);
 
   const addMessage = (text: string, sent: boolean, type: 'question' | 'response' | 'system' = 'response') => {
-    const newMessage: ChatMessageType = {
-      id: messages.length + 1,
-      text,
-      timestamp: new Date(),
-      sent,
-      type
-    };
+    const newMessage = createMessage(text, sent, type);
     setMessages(prev => [...prev, newMessage]);
     return newMessage;
   };
 
   const askUser = async (question: string): Promise<string> => {
     addMessage(question, false, 'question');
-    // In a real implementation, you would wait for user input
-    // For now, we'll return a mock response
-    return "Mock user response";
+    return new Promise((resolve) => {
+      const handleResponse = (text: string) => {
+        resolve(text);
+      };
+      // The response will be handled by handleSendMessage
+      // This promise will be resolved when the user sends a message
+      window.tempResolve = handleResponse;
+    });
   };
 
   const handleSendMessage = async (text: string) => {
     addMessage(text, true);
+
+    if (window.tempResolve) {
+      window.tempResolve(text);
+      window.tempResolve = null;
+      return;
+    }
 
     if (!selectedSector) {
       const sector = processSectorSelection(text);
@@ -54,7 +59,7 @@ const ChatInterface = () => {
         if (template) {
           setTemplate(template.template);
           addMessage(
-            "Great! I've selected the appropriate template for your business. Tell me about your business story - how did it start and what's your vision?",
+            "Great! I've selected the appropriate template for your business. Please upload your Excel file or tell me about your business story.",
             false,
             'question'
           );
@@ -62,40 +67,35 @@ const ChatInterface = () => {
       } else {
         addMessage("Please select a valid sector (1-5)", false, 'system');
       }
-    } else {
+    } else if (!isProcessingCells) {
       processBusinessStory(text);
     }
   };
 
-  const processSectorSelection = (text: string): BusinessSector | null => {
-    const sectorMap: { [key: string]: BusinessSector } = {
-      "1": "retail",
-      "2": "technology",
-      "3": "manufacturing",
-      "4": "services",
-      "5": "food"
-    };
-    return sectorMap[text] || null;
-  };
-
   const processBusinessStory = async (story: string) => {
-    console.log("Processing business story:", story);
-    
-    if (excelData.length > 0) {
-      const processedCells = await processCellBackground(
-        excelData,
-        askUser,
-        searchWeb
+    if (excelData.length > 0 && !isProcessingCells) {
+      setIsProcessingCells(true);
+      try {
+        const processedCells = await processExcelCells(excelData, askUser);
+        setExcelData(processedCells);
+        addMessage(
+          "I've processed all the cells in your Excel file. Is there anything specific you'd like to know about the business plan?",
+          false,
+          'question'
+        );
+      } catch (error) {
+        toast.error("Error processing cells");
+        console.error("Cell processing error:", error);
+      } finally {
+        setIsProcessingCells(false);
+      }
+    } else {
+      addMessage(
+        "Thank you for sharing your story. Please upload an Excel file so I can help you fill in the business plan.",
+        false,
+        'question'
       );
-      setExcelData(processedCells);
-      addMessage("I've processed your Excel file and updated the cells accordingly.", false, 'system');
     }
-
-    addMessage(
-      "Thank you for sharing your story. What's your expected revenue for the first year?",
-      false,
-      'question'
-    );
   };
 
   const handleFileUpload = async (file: File) => {
@@ -105,10 +105,13 @@ const ChatInterface = () => {
       
       toast.success(`File ${file.name} uploaded successfully`);
       addMessage(
-        `File "${file.name}" has been uploaded. I'll analyze its contents and process cells with yellow (user input needed) and pink (web search needed) backgrounds.`,
+        `File "${file.name}" has been uploaded. I'll analyze its contents and process cells with pink backgrounds (web search needed) first, then yellow backgrounds (user input needed).`,
         false,
         'system'
       );
+      
+      // Automatically start processing cells after upload
+      processBusinessStory("");
     } catch (error) {
       toast.error("Error processing file");
       console.error("File processing error:", error);
@@ -164,5 +167,14 @@ const ChatInterface = () => {
     </div>
   );
 };
+
+// Add this to the global Window interface
+declare global {
+  interface Window {
+    tempResolve: ((value: string) => void) | null;
+  }
+}
+
+window.tempResolve = null;
 
 export default ChatInterface;
