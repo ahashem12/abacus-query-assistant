@@ -3,6 +3,7 @@ import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import FileUpload from "./FileUpload";
 import { Download } from "lucide-react";
+import { toast } from "sonner";
 import { ChatMessage as ChatMessageType, BusinessSector } from "../types/businessTypes";
 import { businessTemplates } from "../data/sampleTemplates";
 
@@ -10,7 +11,7 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState<ChatMessageType[]>([
     {
       id: 1,
-      text: "مرحباً! أنا مساعدك في إعداد خطة العمل. ما هو قطاع عملك؟\n\n1. تجارة التجزئة\n2. التكنولوجيا\n3. التصنيع\n4. الخدمات\n5. الطعام",
+      text: "Hello! I'm your business plan assistant. What sector is your business in?\n\n1. Retail\n2. Technology\n3. Manufacturing\n4. Services\n5. Food",
       timestamp: new Date(),
       sent: false,
       type: 'question'
@@ -40,24 +41,30 @@ const ChatInterface = () => {
           setTemplate(template.template);
           const responseMessage: ChatMessageType = {
             id: messages.length + 2,
-            text: "رائع! لقد تم اختيار النموذج المناسب. أخبرني عن قصة عملك وكيف بدأت الفكرة؟",
+            text: "Great! I've selected the appropriate template for your business. Tell me about your business story - how did it start and what's your vision?",
             timestamp: new Date(),
             sent: false,
             type: 'question'
           };
           setMessages(prev => [...prev, responseMessage]);
         }
+      } else {
+        const errorMessage: ChatMessageType = {
+          id: messages.length + 2,
+          text: "Please select a valid sector (1-5)",
+          timestamp: new Date(),
+          sent: false,
+          type: 'system'
+        };
+        setMessages(prev => [...prev, errorMessage]);
       }
     } else {
-      // Handle business story and other questions
-      // Here you would implement the logic to process the story
-      // and fill the template with the provided information
+      // Process business story and ask follow-up questions
       processBusinessStory(text);
     }
   };
 
   const processSectorSelection = (text: string): BusinessSector | null => {
-    // Simple mapping of numeric responses to sectors
     const sectorMap: { [key: string]: BusinessSector } = {
       "1": "retail",
       "2": "technology",
@@ -69,24 +76,64 @@ const ChatInterface = () => {
   };
 
   const processBusinessStory = (story: string) => {
-    // Here you would implement the logic to extract relevant information
-    // from the story and fill the template
     console.log("Processing business story:", story);
-    // Add follow-up questions as needed
+    // Add follow-up question
+    const followUpMessage: ChatMessageType = {
+      id: messages.length + 2,
+      text: "Thank you for sharing your story. What's your expected revenue for the first year?",
+      timestamp: new Date(),
+      sent: false,
+      type: 'question'
+    };
+    setMessages(prev => [...prev, followUpMessage]);
   };
 
   const handleFileUpload = (file: File) => {
     console.log("File uploaded:", file);
-    // Implement file processing logic
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      try {
+        // Here you would process the file content
+        // For now, just show a success message
+        toast.success(`File ${file.name} uploaded successfully`);
+        
+        const message: ChatMessageType = {
+          id: messages.length + 1,
+          text: `File "${file.name}" has been uploaded. I'll analyze its contents.`,
+          timestamp: new Date(),
+          sent: false,
+          type: 'system'
+        };
+        setMessages(prev => [...prev, message]);
+      } catch (error) {
+        toast.error("Error processing file");
+      }
+    };
+
+    reader.onerror = () => {
+      toast.error("Error reading file");
+    };
+
+    reader.readAsText(file);
   };
 
   const handleDownload = () => {
     if (template) {
-      // Implement template download logic
+      // For demo purposes, we'll create a simple text file
+      const blob = new Blob([`Sample template for ${selectedSector} sector`], { type: 'text/plain' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${template}`;
-      link.download = 'business_plan_template.xlsx';
+      link.href = url;
+      link.download = `business_plan_template_${selectedSector}.txt`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Template downloaded successfully");
+    } else {
+      toast.error("No template available");
     }
   };
 
